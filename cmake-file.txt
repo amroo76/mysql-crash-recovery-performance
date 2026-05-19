@@ -1,0 +1,6 @@
+cmake -S "$SRC"  -DBUILD_CONFIG=mysql_release  -DWITH_UNIT_TESTS=0
+
+echo "Build"
+cmake --build "$BUILD_GEN" -- -j3
+#cd $BUILD_GEN
+cpack -G TGZ

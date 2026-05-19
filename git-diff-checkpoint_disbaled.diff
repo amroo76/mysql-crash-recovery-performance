@@ -1,0 +1,249 @@
+diff --git a/storage/innobase/handler/ha_innodb.cc b/storage/innobase/handler/ha_innodb.cc
+index ee4304598f8..65b3a75805c 100644
+--- a/storage/innobase/handler/ha_innodb.cc
++++ b/storage/innobase/handler/ha_innodb.cc
+@@ -21885,7 +21885,7 @@ static float innobase_fts_find_ranking(FT_INFO *fts_hdl, uchar *, uint) {
+   return (fts_retrieve_ranking(result, ft_prebuilt->fts_doc_id));
+ }
+ 
+-#ifdef UNIV_DEBUG
++
+ static bool innodb_background_drop_list_empty = true;
+ static bool innodb_purge_run_now = true;
+ static bool innodb_purge_stop_now = true;
+@@ -21893,10 +21893,10 @@ static bool innodb_log_checkpoint_now = true;
+ static bool innodb_log_checkpoint_fuzzy_now = true;
+ static bool innodb_log_flush_now = true;
+ static bool innodb_buf_flush_list_now = true;
+-
++#ifdef UNIV_DEBUG
+ static uint innodb_merge_threshold_set_all_debug =
+     DICT_INDEX_MERGE_THRESHOLD_DEFAULT;
+-
++#endif /* UNIV_DEBUG */
+ /** Wait for the background drop list to become empty. */
+ static void wait_background_drop_list_empty(THD *, SYS_VAR *, void *,
+                                             const void *) {
+@@ -21971,6 +21971,27 @@ static void checkpoint_fuzzy_now_set(THD *, SYS_VAR *, void *,
+   }
+ }
+ 
++
++/** Force a dirty pages flush now.
++@param[in]  save      immediate result from check function */
++static void buf_flush_list_now_set(THD *, SYS_VAR *, void *, const void *save) {
++  if (*(bool *)save) {
++    buf_flush_sync_all_buf_pools();
++  }
++}
++#ifdef UNIV_DEBUG
++#
++/** Override current MERGE_THRESHOLD setting for all indexes at dictionary
++now.
++@param[in]      save      immediate result from check function */
++static void innodb_merge_threshold_set_all_debug_update(THD *, SYS_VAR *,
++                                                        void *,
++                                                        const void *save) {
++  innodb_merge_threshold_set_all_debug = (*static_cast<const uint *>(save));
++  dict_set_merge_threshold_all_debug(innodb_merge_threshold_set_all_debug);
++}
++#endif /*UNIV_DEBUG*/
++
+ /** Updates srv_checkpoint_disabled - allowing or disallowing checkpoints.
+ This is called when user invokes SET GLOBAL innodb_checkpoints_disabled=0/1.
+ After checkpoints are disabled, there will be no write of a checkpoint,
+@@ -21996,25 +22017,6 @@ static void checkpoint_disabled_update(THD *, SYS_VAR *, void *,
+   log_checkpointer_mutex_exit(log);
+ }
+ 
+-/** Force a dirty pages flush now.
+-@param[in]  save      immediate result from check function */
+-static void buf_flush_list_now_set(THD *, SYS_VAR *, void *, const void *save) {
+-  if (*(bool *)save) {
+-    buf_flush_sync_all_buf_pools();
+-  }
+-}
+-
+-/** Override current MERGE_THRESHOLD setting for all indexes at dictionary
+-now.
+-@param[in]      save      immediate result from check function */
+-static void innodb_merge_threshold_set_all_debug_update(THD *, SYS_VAR *,
+-                                                        void *,
+-                                                        const void *save) {
+-  innodb_merge_threshold_set_all_debug = (*static_cast<const uint *>(save));
+-  dict_set_merge_threshold_all_debug(innodb_merge_threshold_set_all_debug);
+-}
+-
+-#endif /* UNIV_DEBUG */
+ 
+ /** Find and Retrieve the FTS doc_id for the current result row
+ @param[in,out]  fts_hdl FTS handler
+@@ -22291,7 +22293,7 @@ static MYSQL_SYSVAR_ULONG(io_capacity_max, srv_max_io_capacity,
+                           SRV_MAX_IO_CAPACITY_DUMMY_DEFAULT, 100,
+                           SRV_MAX_IO_CAPACITY_LIMIT, 0);
+ 
+-#ifdef UNIV_DEBUG
++
+ static MYSQL_SYSVAR_BOOL(background_drop_list_empty,
+                          innodb_background_drop_list_empty, PLUGIN_VAR_OPCMDARG,
+                          "Wait for the background drop list to become empty",
+@@ -22319,14 +22321,13 @@ static MYSQL_SYSVAR_BOOL(log_checkpoint_fuzzy_now,
+                          "Force fuzzy checkpoint now", nullptr,
+                          checkpoint_fuzzy_now_set, false);
+ 
+-static MYSQL_SYSVAR_BOOL(checkpoint_disabled, srv_checkpoint_disabled,
+-                         PLUGIN_VAR_OPCMDARG, "Disable checkpoints", nullptr,
+-                         checkpoint_disabled_update, false);
++
+ 
+ static MYSQL_SYSVAR_BOOL(buf_flush_list_now, innodb_buf_flush_list_now,
+                          PLUGIN_VAR_OPCMDARG, "Force dirty page flush now",
+                          nullptr, buf_flush_list_now_set, false);
+ 
++#ifdef UNIV_DEBUG
+ static MYSQL_SYSVAR_UINT(
+     merge_threshold_set_all_debug, innodb_merge_threshold_set_all_debug,
+     PLUGIN_VAR_RQCMDARG,
+@@ -22341,8 +22342,13 @@ static MYSQL_SYSVAR_ULONG(
+     "Number of seconds that a semaphore can be held. If semaphore wait crosses"
+     "this value, server will crash",
+     nullptr, nullptr, 600, 25, 600, 0);
++
+ #endif /* UNIV_DEBUG */
+ 
++static MYSQL_SYSVAR_BOOL(checkpoint_disabled, srv_checkpoint_disabled,
++                         PLUGIN_VAR_OPCMDARG, "Disable checkpoints", nullptr,
++                         checkpoint_disabled_update, false);
++
+ static MYSQL_SYSVAR_ULONG(
+     purge_batch_size, srv_purge_batch_size, PLUGIN_VAR_OPCMDARG,
+     "Number of UNDO log pages to purge in one batch from the history list.",
+@@ -23718,7 +23724,7 @@ static SYS_VAR *innobase_system_variables[] = {
+     MYSQL_SYSVAR(monitor_reset_all),
+     MYSQL_SYSVAR(purge_threads),
+     MYSQL_SYSVAR(purge_batch_size),
+-#ifdef UNIV_DEBUG
++
+     MYSQL_SYSVAR(background_drop_list_empty),
+     MYSQL_SYSVAR(purge_run_now),
+     MYSQL_SYSVAR(purge_stop_now),
+@@ -23727,9 +23733,11 @@ static SYS_VAR *innobase_system_variables[] = {
+     MYSQL_SYSVAR(log_checkpoint_fuzzy_now),
+     MYSQL_SYSVAR(checkpoint_disabled),
+     MYSQL_SYSVAR(buf_flush_list_now),
++#ifdef UNIV_DEBUG
+     MYSQL_SYSVAR(merge_threshold_set_all_debug),
+     MYSQL_SYSVAR(semaphore_wait_timeout_debug),
+-#endif /* UNIV_DEBUG */
++#endif /*UNIV_DEBUG*/
++
+ #if defined UNIV_DEBUG || defined UNIV_PERF_DEBUG
+     MYSQL_SYSVAR(page_hash_locks),
+ #endif /* defined UNIV_DEBUG || defined UNIV_PERF_DEBUG */
+diff --git a/storage/innobase/include/row0mysql.h b/storage/innobase/include/row0mysql.h
+index 6958aaba3cd..2d636affe17 100644
+--- a/storage/innobase/include/row0mysql.h
++++ b/storage/innobase/include/row0mysql.h
+@@ -990,10 +990,10 @@ constexpr uint32_t ROW_READ_WITH_LOCKS = 0;
+ constexpr uint32_t ROW_READ_TRY_SEMI_CONSISTENT = 1;
+ constexpr uint32_t ROW_READ_DID_SEMI_CONSISTENT = 2;
+ 
+-#ifdef UNIV_DEBUG
++
+ /** Wait for the background drop list to become empty. */
+ void row_wait_for_background_drop_list_empty();
+-#endif /* UNIV_DEBUG */
++
+ #endif /* !UNIV_HOTBACKUP */
+ 
+ #endif /* row0mysql.h */
+diff --git a/storage/innobase/include/srv0srv.h b/storage/innobase/include/srv0srv.h
+index 602d52e48b8..db264a1aed0 100644
+--- a/storage/innobase/include/srv0srv.h
++++ b/storage/innobase/include/srv0srv.h
+@@ -532,11 +532,11 @@ std::chrono::microseconds get_srv_log_flush_notifier_timeout();
+ /** Whether to generate and require checksums on the redo log pages. */
+ extern bool srv_log_checksums;
+ 
+-#ifdef UNIV_DEBUG
+ 
+ /** If true then disable checkpointing. */
+ extern bool srv_checkpoint_disabled;
+ 
++#ifdef UNIV_DEBUG
+ /* Used to inject a failure to find a free rollback segment. */
+ extern bool srv_inject_too_many_concurrent_trxs;
+ 
+diff --git a/storage/innobase/log/log0chkp.cc b/storage/innobase/log/log0chkp.cc
+index 881828a0bcc..7aacb847b31 100644
+--- a/storage/innobase/log/log0chkp.cc
++++ b/storage/innobase/log/log0chkp.cc
+@@ -566,14 +566,14 @@ static void log_wait_for_checkpoint(const log_t &log, lsn_t requested_lsn) {
+ static bool log_request_checkpoint_validate(const log_t &log) {
+   ut_ad(log_limits_mutex_own(log));
+ 
+-#ifdef UNIV_DEBUG
++
+   if (srv_checkpoint_disabled) {
+     /* Checkpoints are disabled. Pretend it succeeded. */
+     ib::info(ER_IB_MSG_1233) << "Checkpoint explicitly disabled!";
+ 
+     return false;
+   }
+-#endif /* UNIV_DEBUG */
++
+ 
+   return true;
+ }
+@@ -796,11 +796,11 @@ static bool log_should_checkpoint(log_t &log) {
+ 
+   ut_ad(log_checkpointer_mutex_own(log));
+ 
+-#ifdef UNIV_DEBUG
++
+   if (srv_checkpoint_disabled) {
+     return false;
+   }
+-#endif /* UNIV_DEBUG */
++
+ 
+   /* Note: log.allow_checkpoints is set to true after recovery is finished,
+   and changes gathered in recv_sys->metadata_recover are applied to dict_table_t
+diff --git a/storage/innobase/row/row0mysql.cc b/storage/innobase/row/row0mysql.cc
+index a998c306162..37f0377f073 100644
+--- a/storage/innobase/row/row0mysql.cc
++++ b/storage/innobase/row/row0mysql.cc
+@@ -123,7 +123,7 @@ static bool row_mysql_drop_list_inited = false;
+ static bool row_add_table_to_background_drop_list(
+     const char *name); /*!< in: table name */
+ 
+-#ifdef UNIV_DEBUG
++
+ /** Wait for the background drop list to become empty. */
+ void row_wait_for_background_drop_list_empty() {
+   while (UT_LIST_GET_LEN(row_mysql_drop_list) > 0) {
+@@ -134,7 +134,7 @@ void row_wait_for_background_drop_list_empty() {
+   row_drop_tables_for_mysql_in_background on UT_LIST_REMOVE, which is after
+   the drop processing is done. */
+ }
+-#endif /* UNIV_DEBUG */
++
+ 
+ /** Delays an INSERT, DELETE or UPDATE operation if the purge is lagging. */
+ static void row_mysql_delay_if_needed(void) {
+diff --git a/storage/innobase/srv/srv0srv.cc b/storage/innobase/srv/srv0srv.cc
+index d215fc107c0..da732a8ce25 100644
+--- a/storage/innobase/srv/srv0srv.cc
++++ b/storage/innobase/srv/srv0srv.cc
+@@ -369,9 +369,10 @@ std::chrono::microseconds get_srv_log_flush_notifier_timeout() {
+ /** Whether to generate and require checksums on the redo log pages. */
+ bool srv_log_checksums;
+ 
+-#ifdef UNIV_DEBUG
++
+ 
+ bool srv_checkpoint_disabled = false;
++#ifdef UNIV_DEBUG
+ 
+ bool srv_inject_too_many_concurrent_trxs = false;
+ 
